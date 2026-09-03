@@ -1,0 +1,73 @@
+[project]
+name = "procureai"
+version = "0.1.0"
+description = "AI-powered procurement intelligence layer for Indian manufacturing MSMEs"
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [
+    { name = "TechCareerAdvisory", email = "admin@techcareeradvisory.in" }
+]
+dependencies = [
+    "fastapi==0.115.6",
+    "uvicorn[standard]==0.32.1",
+    "sqlalchemy[asyncio]==2.0.36",
+    "asyncpg==0.30.0",
+    "alembic==1.14.0",
+    "pydantic-settings==2.6.1",
+    "python-dotenv==1.0.1",
+    "python-jose[cryptography]==3.3.0",
+    "passlib[bcrypt]==1.7.4",
+    "cryptography==43.0.3",
+    
+    "apscheduler==3.10.4",
+    "loguru==0.7.3",
+    "sentry-sdk[fastapi]==2.19.2",
+    "PyMuPDF==1.25.1",
+    "pandas==2.2.3",
+    "anthropic==0.40.0",
+    
+    "python-multipart==0.0.20",
+    "tenacity==9.0.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest==8.3.4",
+    "pytest-asyncio==0.24.0",
+    "pytest-httpx==0.34.0",
+    "pytest-cov==6.0.0",
+    "factory-boy==3.3.1",
+    "ruff==0.8.4",
+    "mypy==1.13.0",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["E501", "B008"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["procureai"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "--cov=src/procureai --cov-report=term-missing"
+
+[tool.coverage.run]
+omit = ["tests/*", "alembic/*"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/procureai"]
