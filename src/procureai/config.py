@@ -171,6 +171,11 @@ class Settings(BaseSettings):
         description="Fernet encryption key for sensitive data at rest."
     )
 
+    redis_url: str = Field(
+        default="redis://localhost:6379/0",
+        description="Redis connection URL for Celery broker and result backend."
+    )
+
     # ── Computed Properties ───────────────────────────────────────────────────
     # These are derived from other settings — not read from environment.
     # @computed_field makes them available as regular attributes.
