@@ -219,7 +219,7 @@ class ITCTracking(Base, BaseModel):
     # When was the last reconciliation run for this period?
     # None = never run yet
     last_reconciled_at: Mapped[str | None] = mapped_column(
-        String(30),
+        String(50),
         nullable=True,
         comment="ISO datetime of last reconciliation run"
     )
@@ -227,7 +227,7 @@ class ITCTracking(Base, BaseModel):
     # When was the customer alerted about this period's results?
     # None = alert not yet sent
     alert_sent_at: Mapped[str | None] = mapped_column(
-        String(30),
+        String(50),
         nullable=True,
         comment="ISO datetime when alert was sent to customer"
     )

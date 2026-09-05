@@ -21,7 +21,7 @@ import asyncio
 from loguru import logger
 
 from procureai.celery_app import celery_app
-from procureai.database import AsyncSessionLocal
+from procureai.database import get_sync_session
 from procureai.services.price_engine import price_service
 
 
@@ -52,7 +52,8 @@ def run_price_pulse(self) -> dict:
     )
 
     async def _run():
-        async with AsyncSessionLocal() as db:
+        SessionLocal = get_sync_session()
+        async with SessionLocal() as db:
             return await price_service.run_weekly_price_pulse(db)
 
     try:
@@ -116,7 +117,8 @@ def check_single_customer_prices(
     )
 
     async def _run():
-        async with AsyncSessionLocal() as db:
+        SessionLocal = get_sync_session()
+        async with SessionLocal() as db:
             return await price_service.check_customer_prices(
                 customer_id=customer_id,
                 db=db,
@@ -170,7 +172,8 @@ def get_price_history(
     )
 
     async def _run():
-        async with AsyncSessionLocal() as db:
+        SessionLocal = get_sync_session()
+        async with SessionLocal() as db:
             history = await price_service.get_price_history(
                 material_name=material_name,
                 cluster=cluster,

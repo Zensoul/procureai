@@ -20,7 +20,7 @@ import asyncio
 from loguru import logger
 
 from procureai.celery_app import celery_app
-from procureai.database import AsyncSessionLocal
+from procureai.database import get_sync_session
 from procureai.services.delivery_tracker import delivery_service
 
 
@@ -49,7 +49,8 @@ def run_delivery_check(self) -> dict:
     )
 
     async def _run():
-        async with AsyncSessionLocal() as db:
+        SessionLocal = get_sync_session()
+        async with SessionLocal() as db:
             return await delivery_service.check_and_alert_owners(db)
 
     try:
@@ -98,7 +99,8 @@ def run_supplier_followup(self) -> dict:
     )
 
     async def _run():
-        async with AsyncSessionLocal() as db:
+        SessionLocal = get_sync_session()
+        async with SessionLocal() as db:
             return await delivery_service.check_and_followup_suppliers(db)
 
     try:
@@ -150,7 +152,8 @@ def mark_delivery_confirmed(self, purchase_id: str) -> dict:
     )
 
     async def _run():
-        async with AsyncSessionLocal() as db:
+        SessionLocal = get_sync_session()
+        async with SessionLocal() as db:
             purchase = await delivery_service.mark_delivery_confirmed(
                 purchase_id=purchase_id,
                 db=db,
@@ -198,7 +201,8 @@ def mark_delivery_received(
     )
 
     async def _run():
-        async with AsyncSessionLocal() as db:
+        SessionLocal = get_sync_session()
+        async with SessionLocal() as db:
             purchase = await delivery_service.mark_delivery_received(
                 purchase_id=purchase_id,
                 actual_date=actual_date,

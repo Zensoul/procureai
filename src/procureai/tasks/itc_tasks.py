@@ -31,7 +31,7 @@ from celery import shared_task
 from loguru import logger
 
 from procureai.celery_app import celery_app
-from procureai.database import AsyncSessionLocal
+from procureai.database import get_sync_session
 from procureai.services.itc_reconciliation import itc_service
 from procureai.services.messaging import messaging_service
 
@@ -61,7 +61,8 @@ def run_itc_single(
     )
 
     async def _run():
-        async with AsyncSessionLocal() as db:
+        SessionLocal = get_sync_session()
+        async with SessionLocal() as db:
             try:
                 result = await itc_service.reconcile_customer(
                     customer_id=customer_id,
@@ -152,7 +153,8 @@ def run_itc_batch(
     )
 
     async def _run():
-        async with AsyncSessionLocal() as db:
+        SessionLocal = get_sync_session()
+        async with SessionLocal() as db:
             return await itc_service.reconcile_all_customers(
                 tax_period=tax_period,
                 db=db,

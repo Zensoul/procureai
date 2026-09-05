@@ -274,3 +274,22 @@ async def disconnect_db() -> None:
     logger.info("Closing database connections...")
     await engine.dispose()
     logger.info("Database connections closed")
+
+def get_sync_session():
+    """
+    Create a fresh async engine and session for Celery tasks.
+    Celery workers use asyncio.run() which creates a new event loop
+    each time — we need a fresh engine bound to that loop.
+    """
+    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+    from sqlalchemy.pool import NullPool
+
+    fresh_engine = create_async_engine(
+        settings.database_url,
+        poolclass=NullPool,  # No pooling — fresh connection each time
+    )
+    return async_sessionmaker(
+        bind=fresh_engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
