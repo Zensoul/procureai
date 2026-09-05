@@ -176,6 +176,11 @@ class Settings(BaseSettings):
         description="Redis connection URL for Celery broker and result backend."
     )
 
+    telegram_bot_token: str = Field(
+        ...,
+       description="Telegram bot token from BotFather"
+    )
+
     # ── Computed Properties ───────────────────────────────────────────────────
     # These are derived from other settings — not read from environment.
     # @computed_field makes them available as regular attributes.

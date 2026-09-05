@@ -47,6 +47,11 @@ from procureai.integrations.mcx import (
     PriceComparison,
 )
 
+from procureai.integrations.telegram_bot import (
+    TelegramBotClient,
+    telegram_client,
+)
+
 __all__ = [
     # GST
     "SandboxGSTClient",
@@ -72,4 +77,7 @@ __all__ = [
     "mcx_client",
     "CommodityPrice",
     "PriceComparison",
+
+    "TelegramBotClient",
+    "telegram_client",
 ]
