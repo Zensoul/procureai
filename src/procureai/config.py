@@ -134,14 +134,14 @@ class Settings(BaseSettings):
     # Used only for PDF invoice parsing (Feature 1 fallback).
     # Claude Sonnet 4.6 is the correct model for this use case —
     # accurate enough for structured data extraction, cost-effective.
-    anthropic_api_key: str = Field(
-        ...,
-        description="Anthropic API key for Claude invoice parsing."
+    openai_api_key: str = Field(
+    ...,
+    description="OpenAI API key for invoice PDF parsing."
     )
 
-    anthropic_model: str = Field(
-        default="claude-sonnet-4-6",
-        description="Claude model to use. Do not change without testing."
+    openai_model: str = Field(
+    gdefault="gpt-4o",
+    description="OpenAI model for PDF extraction."
     )
 
     # ── Observability — Sentry ────────────────────────────────────────────────

@@ -23,7 +23,6 @@ import uuid
 from decimal import Decimal
 from typing import Optional
 
-import anthropic
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from loguru import logger
 from sqlalchemy import select, and_
@@ -422,37 +421,27 @@ async def _extract_invoice_from_pdf(
     filename: str,
 ) -> Optional[dict]:
     """
-    Use Claude API to extract structured data from PDF invoice.
-
-    FRESHER NOTE:
-    This is the only place in Phase 1 where we use Claude API directly.
-    We send the PDF and ask Claude to extract specific fields.
-    Claude returns JSON which we parse into a Python dict.
+    Use OpenAI GPT-4o to extract structured data from PDF invoice.
     """
     try:
-        client = anthropic.AsyncAnthropic(
-            api_key=settings.anthropic_api_key
-        )
+        from openai import AsyncOpenAI
+        import base64
+        import json
+
+        client = AsyncOpenAI(api_key=settings.openai_api_key)
 
         pdf_base64 = base64.standard_b64encode(pdf_bytes).decode("utf-8")
 
-        message = await client.messages.create(
-            model=settings.anthropic_model,
+        response = await client.chat.completions.create(
+            model=settings.openai_model,
             max_tokens=1000,
-            messages=[{
-                "role": "user",
-                "content": [
-                    {
-                        "type": "document",
-                        "source": {
-                            "type": "base64",
-                            "media_type": "application/pdf",
-                            "data": pdf_base64,
-                        }
-                    },
-                    {
-                        "type": "text",
-                        "text": """Extract the following from this Indian supplier invoice.
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": """Extract the following from this Indian supplier invoice.
 Return ONLY valid JSON, no explanation, no markdown:
 {
   "supplier_name": "business name of the seller",
@@ -470,23 +459,28 @@ Return ONLY valid JSON, no explanation, no markdown:
   "total_value": numeric total including GST
 }
 If any field is not found, use null."""
-                    }
-                ]
-            }]
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:application/pdf;base64,{pdf_base64}"
+                            }
+                        }
+                    ]
+                }
+            ]
         )
 
-        response_text = message.content[0].text.strip()
+        response_text = response.choices[0].message.content.strip()
 
-        # Remove markdown code blocks if present
         if response_text.startswith("```"):
             lines = response_text.split("\n")
             response_text = "\n".join(lines[1:-1])
 
-        import json
         extracted = json.loads(response_text)
 
         logger.info(
-            f"Claude extracted invoice data from {filename}: "
+            f"OpenAI extracted invoice data from {filename}: "
             f"supplier={extracted.get('supplier_name')}, "
             f"inv={extracted.get('invoice_number')}"
         )
@@ -494,9 +488,8 @@ If any field is not found, use null."""
         return extracted
 
     except Exception as e:
-        logger.error(f"Claude PDF extraction failed for {filename}: {e}")
+        logger.error(f"OpenAI PDF extraction failed for {filename}: {e}")
         return None
-
 
 def _date_to_tax_period(invoice_date: str) -> str:
     """
