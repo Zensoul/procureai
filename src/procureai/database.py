@@ -78,6 +78,7 @@ def _create_engine():
         )
 
     # Production and development use connection pooling
+        # Production and development use connection pooling
     return create_async_engine(
         settings.database_url,
 
@@ -96,6 +97,9 @@ def _create_engine():
         # Close idle connections after 30 minutes
         # Prevents stale connections from accumulating
         pool_recycle=1800,
+
+        # Force SSL and IPv4 for Supabase compatibility
+        
     )
 
 
