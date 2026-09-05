@@ -101,7 +101,7 @@ async def lifespan(app: FastAPI):
     # Verify Redis is reachable
     try:
         from redis import Redis
-        r = Redis.from_url(settings.redis_url)
+        r = Redis.from_url(settings.redis_url, ssl_cert_reqs=None)
         r.ping()
         r.close()
         logger.info("Redis connection verified")
