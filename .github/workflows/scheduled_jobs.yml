@@ -1,0 +1,59 @@
+name: ProcureAI Scheduled Jobs
+
+on:
+  schedule:
+    - cron: '30 3 16 * *'
+    - cron: '30 2 * * *'
+    - cron: '30 3 * * 1'
+  workflow_dispatch:
+
+jobs:
+  itc-monthly:
+    runs-on: ubuntu-latest
+    if: github.event.schedule == '30 3 16 * *' || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Wake up API
+        run: curl -s https://procureai-api-iftl.onrender.com/internal/health
+
+      - name: Trigger ITC reconciliation
+        run: |
+          curl -X POST https://procureai-api-iftl.onrender.com/internal/run-itc-monthly \
+            -H "Authorization: Bearer ${{ secrets.PROCUREAI_SECRET_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d '{}' \
+            --max-time 300
+
+  delivery-daily:
+    runs-on: ubuntu-latest
+    if: github.event.schedule == '30 2 * * *' || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Wake up API
+        run: curl -s https://procureai-api-iftl.onrender.com/internal/health
+
+      - name: Trigger delivery check
+        run: |
+          curl -X POST https://procureai-api-iftl.onrender.com/internal/run-delivery-check \
+            -H "Authorization: Bearer ${{ secrets.PROCUREAI_SECRET_KEY }}" \
+            -H "Content-Type: application/json" \
+            --max-time 120
+
+      - name: Trigger supplier followup
+        run: |
+          curl -X POST https://procureai-api-iftl.onrender.com/internal/run-supplier-followup \
+            -H "Authorization: Bearer ${{ secrets.PROCUREAI_SECRET_KEY }}" \
+            -H "Content-Type: application/json" \
+            --max-time 120
+
+  price-weekly:
+    runs-on: ubuntu-latest
+    if: github.event.schedule == '30 3 * * 1' || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Wake up API
+        run: curl -s https://procureai-api-iftl.onrender.com/internal/health
+
+      - name: Trigger price pulse
+        run: |
+          curl -X POST https://procureai-api-iftl.onrender.com/internal/run-price-pulse \
+            -H "Authorization: Bearer ${{ secrets.PROCUREAI_SECRET_KEY }}" \
+            -H "Content-Type: application/json" \
+            --max-time 120
