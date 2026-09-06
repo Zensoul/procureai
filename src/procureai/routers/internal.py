@@ -339,24 +339,81 @@ async def trigger_supplier_followup() -> TaskResponse:
     summary="Send morning brief to all customers",
     dependencies=[Depends(verify_service_token)],
 )
-async def trigger_morning_brief() -> TaskResponse:
+async def trigger_morning_brief(
+    db: AsyncSession = Depends(get_db),
+) -> TaskResponse:
     """
     Send daily morning brief to all customers with Telegram.
-    Called by GitHub Actions every day at 8:00 AM IST.
+    Runs synchronously — no Celery worker needed.
     """
-    from procureai.tasks.delivery_tasks import run_morning_brief
+    from procureai.integrations.telegram_bot import telegram_client
+    from procureai.models.customer import Customer
+    from procureai.models.itc import ITCTracking
+    from procureai.models.purchase import Purchase
+    from sqlalchemy import select, and_
+    from datetime import date
+    import uuid as uuid_lib
 
-    task = run_morning_brief.delay()
+    today = date.today().isoformat()
+    current_month = date.today().strftime("%m%Y")
 
-    logger.info(f"Morning brief triggered: task_id={task.id}")
+    result = await db.execute(
+        select(Customer).where(
+            and_(
+                Customer.is_active == True,
+                Customer.telegram_chat_id.isnot(None),
+            )
+        )
+    )
+    customers = result.scalars().all()
+
+    sent = 0
+    failed = 0
+
+    for customer in customers:
+        try:
+            itc_result = await db.execute(
+                select(ITCTracking).where(
+                    and_(
+                        ITCTracking.customer_id == customer.id,
+                        ITCTracking.tax_period == current_month,
+                    )
+                )
+            )
+            itc_record = itc_result.scalar_one_or_none()
+            itc_at_risk = float(itc_record.at_risk_itc) if itc_record else 0
+
+            delivery_result = await db.execute(
+                select(Purchase).where(
+                    and_(
+                        Purchase.customer_id == customer.id,
+                        Purchase.expected_delivery_date <= today,
+                        Purchase.delivery_received == False,
+                    )
+                )
+            )
+            overdue = delivery_result.scalars().all()
+
+            await telegram_client.send_morning_brief(
+                chat_id=customer.telegram_chat_id,
+                owner_name=customer.owner_name,
+                itc_at_risk=itc_at_risk,
+                overdue_deliveries=len(overdue),
+            )
+            sent += 1
+            logger.info(f"Morning brief sent to {customer.owner_name}")
+
+        except Exception as e:
+            logger.error(f"Morning brief failed for {customer.gstin}: {e}")
+            failed += 1
+            continue
 
     return TaskResponse(
-        task_id=task.id,
-        status="queued",
-        message=f"Morning brief queued. "
-                f"Check status at /internal/task-status/{task.id}",
-    )    
-
+        task_id="sync-execution",
+        status="completed",
+        message=f"Morning brief sent to {sent} customers. "
+                f"{failed} failed.",
+    )
 
 # ==============================================================================
 # PRICE PULSE TRIGGER
