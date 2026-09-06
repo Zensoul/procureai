@@ -614,3 +614,364 @@ async def receive_rcs_reply(payload: WebhookRCSReply) -> dict:
         return {"status": "noted", "action": "details_requested"}
 
     return {"status": "received", "action": "unknown"}
+
+
+# ==============================================================================
+# TELEGRAM WEBHOOK
+# ==============================================================================
+
+@router.post(
+    "/webhook/telegram",
+    summary="Receive Telegram bot updates",
+    status_code=status.HTTP_200_OK,
+)
+async def receive_telegram_update(
+    payload: dict,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """
+    Receive incoming Telegram messages and button taps.
+    Handles onboarding conversation flow.
+    """
+    from procureai.integrations.telegram_bot import telegram_client
+    from procureai.models.customer import Customer
+    from sqlalchemy import select
+    import uuid as uuid_lib
+    import re
+
+    try:
+        if "message" in payload:
+            message = payload["message"]
+            chat_id = message["chat"]["id"]
+            text = message.get("text", "").strip()
+            first_name = message["chat"].get("first_name", "")
+
+            if text == "/start":
+                await telegram_client.send_message(
+                    chat_id=chat_id,
+                    text=(
+                        f"🏭 <b>ProcureAI ge Swagata, {first_name}!</b>\n\n"
+                        "Naanu ninna procurement intelligence assistant.\n\n"
+                        "<b>Enrol maadalu, kelida details kali:</b>\n\n"
+                        "<code>Owner Hesaru\n"
+                        "Business Hesaru\n"
+                        "GSTIN\n"
+                        "Mobile Number\n"
+                        "Area (Bommasandra/Peenya/Electronic City)</code>\n\n"
+                        "<b>Example:</b>\n"
+                        "<code>Ramesh Kumar\n"
+                        "Ramesh Auto Parts\n"
+                        "29ABCDE1234F1Z5\n"
+                        "9845123456\n"
+                        "Bommasandra</code>\n\n"
+                        "Ee format li reply maadi! 👆"
+                    )
+                )
+                return {"status": "welcome_sent"}
+
+            if text.startswith("/help"):
+                await telegram_client.send_message(
+                    chat_id=chat_id,
+                    text=(
+                        "🆘 <b>Help</b>\n\n"
+                        "/start — Enrol maadalu\n"
+                        "/itc — ITC status nodi\n"
+                        "/delivery — Pending deliveries\n"
+                        "/price — Market rates\n"
+                        "/status — Account status\n\n"
+                        "Invoice PDF iddare forward maadi!"
+                    )
+                )
+                return {"status": "help_sent"}
+
+            if text.startswith("/status"):
+                result = await db.execute(
+                    select(Customer).where(
+                        Customer.telegram_chat_id == chat_id
+                    )
+                )
+                customer = result.scalar_one_or_none()
+                if customer:
+                    await telegram_client.send_message(
+                        chat_id=chat_id,
+                        text=(
+                            f"✅ <b>Account Active</b>\n\n"
+                            f"👤 {customer.owner_name}\n"
+                            f"🏭 {customer.business_name}\n"
+                            f"📋 GSTIN: {customer.gstin}\n"
+                            f"📍 Cluster: {customer.cluster or 'Not set'}\n\n"
+                            "Ninna account sari ide!"
+                        )
+                    )
+                else:
+                    await telegram_client.send_message(
+                        chat_id=chat_id,
+                        text="❌ Account found aagilla.\n\n/start send maadi enrol maadalu."
+                    )
+                return {"status": "status_sent"}
+
+            if text.startswith("/itc"):
+                result = await db.execute(
+                    select(Customer).where(
+                        Customer.telegram_chat_id == chat_id
+                    )
+                )
+                customer = result.scalar_one_or_none()
+                if not customer:
+                    await telegram_client.send_message(
+                        chat_id=chat_id,
+                        text="❌ Enrol maadilla. /start send maadi."
+                    )
+                    return {"status": "not_enrolled"}
+
+                from procureai.models.itc import ITCTracking
+                from datetime import date
+                from sqlalchemy import and_
+                current_month = date.today().strftime("%m%Y")
+                itc_result = await db.execute(
+                    select(ITCTracking).where(
+                        and_(
+                            ITCTracking.customer_id == customer.id,
+                            ITCTracking.tax_period == current_month,
+                        )
+                    )
+                )
+                itc_record = itc_result.scalar_one_or_none()
+                if itc_record:
+                    await telegram_client.send_message(
+                        chat_id=chat_id,
+                        text=(
+                            f"📊 <b>ITC Status</b>\n\n"
+                            f"📅 {itc_record.period_display}\n"
+                            f"💰 Eligible: ₹{itc_record.eligible_itc:,.0f}\n"
+                            f"✅ Matched: ₹{itc_record.matched_itc:,.0f}\n"
+                            f"⚠️ At Risk: ₹{itc_record.at_risk_itc:,.0f}\n"
+                            f"🎉 Recovered: ₹{itc_record.recovered_itc:,.0f}"
+                        )
+                    )
+                else:
+                    await telegram_client.send_message(
+                        chat_id=chat_id,
+                        text=(
+                            "📊 <b>ITC Status</b>\n\n"
+                            "Ee thingli inna reconciliation aagilla.\n"
+                            "16th ge automatically run aaguthey."
+                        )
+                    )
+                return {"status": "itc_sent"}
+
+            # Onboarding data — 4+ lines
+            lines = [l.strip() for l in text.split("\n") if l.strip()]
+            if len(lines) >= 4:
+                owner_name = lines[0]
+                business_name = lines[1]
+                gstin = lines[2].upper().strip()
+                phone = lines[3].strip()
+                cluster_raw = lines[4].lower().strip() if len(lines) > 4 else "bommasandra"
+
+                cluster_map = {
+                    "bommasandra": "bommasandra",
+                    "peenya": "peenya",
+                    "electronic city": "electronic_city",
+                    "electronic_city": "electronic_city",
+                    "whitefield": "whitefield",
+                }
+                cluster = cluster_map.get(cluster_raw, cluster_raw)
+
+                gstin_pattern = r'^\d{2}[A-Z]{5}\d{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$'
+                if not re.match(gstin_pattern, gstin):
+                    await telegram_client.send_message(
+                        chat_id=chat_id,
+                        text=(
+                            "❌ <b>GSTIN format tappu ide.</b>\n\n"
+                            "Example: <code>29ABCDE1234F1Z5</code>\n\n"
+                            "Correct maadi meelu try maadi."
+                        )
+                    )
+                    return {"status": "invalid_gstin"}
+
+                phone_clean = phone.replace("+91", "").replace(" ", "").replace("-", "")
+                if not re.match(r'^[6-9]\d{9}$', phone_clean):
+                    await telegram_client.send_message(
+                        chat_id=chat_id,
+                        text=(
+                            "❌ <b>Mobile number tappu ide.</b>\n\n"
+                            "Example: <code>9845123456</code>"
+                        )
+                    )
+                    return {"status": "invalid_phone"}
+
+                # Check if already enrolled
+                existing = await db.execute(
+                    select(Customer).where(Customer.gstin == gstin)
+                )
+                existing_customer = existing.scalar_one_or_none()
+
+                if existing_customer:
+                    if not existing_customer.telegram_chat_id:
+                        existing_customer.telegram_chat_id = chat_id
+                        db.add(existing_customer)
+                        await db.flush()
+                    await telegram_client.send_message(
+                        chat_id=chat_id,
+                        text=(
+                            f"✅ <b>Ninna account iddey ide!</b>\n\n"
+                            f"👤 {existing_customer.owner_name}\n"
+                            f"🏭 {existing_customer.business_name}\n\n"
+                            "Telegram connected aayitu!"
+                        )
+                    )
+                    return {"status": "already_enrolled"}
+
+                # Enrol new customer
+                customer = Customer(
+                    owner_name=owner_name,
+                    business_name=business_name,
+                    gstin=gstin,
+                    phone=phone_clean,
+                    preferred_channel="telegram",
+                    preferred_language="kn",
+                    cluster=cluster,
+                    telegram_chat_id=chat_id,
+                )
+                db.add(customer)
+                await db.flush()
+
+                logger.info(
+                    f"New customer enrolled via Telegram: "
+                    f"{gstin} ({business_name})"
+                )
+
+                await telegram_client.send_message(
+                    chat_id=chat_id,
+                    text=(
+                        f"✅ <b>Enrolment successful!</b>\n\n"
+                        f"👤 {owner_name}\n"
+                        f"🏭 {business_name}\n"
+                        f"📋 GSTIN: {gstin}\n"
+                        f"📍 {cluster.title()}\n\n"
+                        f"<b>Nimma services:</b>\n"
+                        f"☀️ Daily morning brief — 8 AM\n"
+                        f"💰 Monthly ITC reconciliation — 16th\n"
+                        f"🏛️ GeM tender alerts — daily\n"
+                        f"🚚 Delivery tracking\n"
+                        f"📊 Price benchmarking\n\n"
+                        f"Naaleyu beleige ninna first brief barthey!\n\n"
+                        f"— ProcureAI"
+                    )
+                )
+
+                # Send sample morning brief immediately
+                await telegram_client.send_morning_brief(
+                    chat_id=chat_id,
+                    owner_name=owner_name,
+                    itc_at_risk=0,
+                    overdue_deliveries=0,
+                )
+
+                return {
+                    "status": "enrolled",
+                    "customer_id": str(customer.id)
+                }
+
+            # Document upload
+            if "document" in message:
+                result = await db.execute(
+                    select(Customer).where(
+                        Customer.telegram_chat_id == chat_id
+                    )
+                )
+                customer = result.scalar_one_or_none()
+                if not customer:
+                    await telegram_client.send_message(
+                        chat_id=chat_id,
+                        text="❌ Enrol maadilla. /start send maadi."
+                    )
+                    return {"status": "not_enrolled"}
+
+                file_name = message["document"].get("file_name", "invoice.pdf")
+                await telegram_client.send_message(
+                    chat_id=chat_id,
+                    text=(
+                        f"📄 <b>{file_name} tilikondide!</b>\n\n"
+                        "Invoice data extract maadtha ide...\n"
+                        "2-3 nimisha wait maadi. ⏳"
+                    )
+                )
+                return {"status": "document_received"}
+
+            # Unknown message
+            result = await db.execute(
+                select(Customer).where(
+                    Customer.telegram_chat_id == chat_id
+                )
+            )
+            customer = result.scalar_one_or_none()
+            if not customer:
+                await telegram_client.send_message(
+                    chat_id=chat_id,
+                    text="Namaskara! Enrol maadalu /start send maadi."
+                )
+            else:
+                await telegram_client.send_message(
+                    chat_id=chat_id,
+                    text=(
+                        f"Namaskara {customer.owner_name.split()[0]} avare!\n\n"
+                        "/itc — ITC status\n"
+                        "/status — Account details\n"
+                        "/help — Full help"
+                    )
+                )
+            return {"status": "message_handled"}
+
+        # Callback queries (button taps)
+        if "callback_query" in payload:
+            callback = payload["callback_query"]
+            chat_id = callback["message"]["chat"]["id"]
+            data = callback.get("data", "")
+            callback_id = callback["id"]
+
+            from procureai.integrations.telegram_bot import telegram_client
+            await telegram_client.answer_callback_query(
+                callback_query_id=callback_id,
+                text="✅ Noted!",
+            )
+
+            if data == "itc_called":
+                await telegram_client.send_message(
+                    chat_id=chat_id,
+                    text="✅ Supplier ge call maadidira! Good luck.",
+                )
+            elif data == "itc_dismiss":
+                await telegram_client.send_message(
+                    chat_id=chat_id,
+                    text="Dismissed. Next month check maadthivi.",
+                )
+            elif data == "delivery_received":
+                await telegram_client.send_message(
+                    chat_id=chat_id,
+                    text="✅ Delivery received mark aayitu!",
+                )
+            elif data.startswith("gem_interested_"):
+                bid_number = data.replace("gem_interested_", "")
+                await telegram_client.send_message(
+                    chat_id=chat_id,
+                    text=(
+                        f"✅ <b>Interested noted!</b>\n\n"
+                        f"Bid: {bid_number}\n\n"
+                        "GeM portal li apply maadi:\n"
+                        "👉 https://gem.gov.in"
+                    ),
+                )
+            elif data.startswith("gem_dismiss_"):
+                await telegram_client.send_message(
+                    chat_id=chat_id,
+                    text="Dismissed. Mattonde tender barthey! 👍",
+                )
+
+            return {"status": "callback_handled"}
+
+    except Exception as e:
+        logger.error(f"Telegram webhook error: {e}")
+
+    return {"status": "ok"}    
