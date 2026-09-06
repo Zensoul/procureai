@@ -432,6 +432,129 @@ async def get_customer_itc_history(
     ]
 
 
+@router.get(
+    "/{customer_id}/gst-position",
+    summary="Get GST liability position for current month",
+)
+async def get_gst_position(
+    customer_id: str,
+    tax_period: Optional[str] = Query(
+        default=None,
+        description="Tax period MMYYYY — defaults to current month"
+    ),
+    output_gst: float = Query(
+        default=0,
+        description="Output GST collected from sales this month"
+    ),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """
+    Calculate GST liability position for a customer.
+
+    Shows:
+    - Output GST (from sales — entered manually)
+    - Input GST (from purchases — from our database)
+    - ITC at risk (from GSTR-2B reconciliation)
+    - Safe ITC to claim
+    - Estimated net liability
+    - Liability if full ITC recovered
+
+    FRESHER NOTE:
+    GST liability = Output GST - Input GST (ITC)
+    If you collected ₹84,000 GST from customers
+    and paid ₹47,320 GST to suppliers —
+    you owe the government ₹84,000 - ₹47,320 = ₹36,680
+    But only if all your ITC is safe (appears in GSTR-2B).
+    """
+    from datetime import date
+    from decimal import Decimal
+    from procureai.models.purchase import Purchase
+    from procureai.models.itc import ITCTracking
+    from sqlalchemy import select, and_, func
+    import uuid as uuid_lib
+
+    await _get_customer_or_404(customer_id, db)
+
+    # Default to current month
+    if not tax_period:
+        today = date.today()
+        tax_period = f"{today.month:02d}{today.year}"
+
+    period_display = f"{['January','February','March','April','May','June','July','August','September','October','November','December'][int(tax_period[:2])-1]} {tax_period[2:]}"
+
+    # Get total input GST from purchases this period
+    purchase_result = await db.execute(
+        select(
+            func.sum(Purchase.gst_amount).label("total_input_gst"),
+            func.count(Purchase.id).label("invoice_count"),
+        ).where(
+            and_(
+                Purchase.customer_id == uuid_lib.UUID(customer_id),
+                Purchase.tax_period == tax_period,
+                Purchase.itc_eligible == True,
+            )
+        )
+    )
+    purchase_row = purchase_result.fetchone()
+    total_input_gst = float(purchase_row.total_input_gst or 0)
+    invoice_count = int(purchase_row.invoice_count or 0)
+
+    # Get ITC at risk from reconciliation
+    itc_result = await db.execute(
+        select(ITCTracking).where(
+            and_(
+                ITCTracking.customer_id == uuid_lib.UUID(customer_id),
+                ITCTracking.tax_period == tax_period,
+            )
+        )
+    )
+    itc_record = itc_result.scalar_one_or_none()
+    itc_at_risk = float(itc_record.at_risk_itc) if itc_record else 0
+    itc_recovered = float(itc_record.recovered_itc) if itc_record else 0
+
+    # Calculate safe ITC — only what has appeared in GSTR-2B
+    safe_itc = total_input_gst - itc_at_risk
+
+    # GST liability calculations
+    output_gst_amount = float(output_gst)
+    estimated_liability = max(0, output_gst_amount - safe_itc)
+    best_case_liability = max(0, output_gst_amount - total_input_gst)
+
+    # Potential saving if ITC recovered
+    potential_saving = estimated_liability - best_case_liability
+
+    return {
+        "customer_id": customer_id,
+        "tax_period": tax_period,
+        "period_display": period_display,
+
+        "output_gst": output_gst_amount,
+        "total_input_gst": total_input_gst,
+        "invoice_count": invoice_count,
+
+        "itc_at_risk": itc_at_risk,
+        "safe_itc_to_claim": safe_itc,
+        "itc_recovered_this_month": itc_recovered,
+
+        "estimated_liability": estimated_liability,
+        "best_case_liability": best_case_liability,
+        "potential_saving_if_itc_recovered": potential_saving,
+
+        "summary": {
+            "message": (
+                f"Your estimated GST liability for {period_display} "
+                f"is ₹{estimated_liability:,.0f}. "
+                + (
+                    f"If ₹{itc_at_risk:,.0f} at-risk ITC is recovered, "
+                    f"liability drops to ₹{best_case_liability:,.0f}."
+                    if itc_at_risk > 0 else
+                    "All your ITC is safe to claim."
+                )
+            ),
+            "action_needed": itc_at_risk > 0,
+        }
+    }
+
 # ==============================================================================
 # PRIVATE HELPERS
 # ==============================================================================
