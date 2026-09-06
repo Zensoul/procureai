@@ -195,3 +195,35 @@ def get_price_history(
             f"[Task {self.request.id}] Price history failed: {e}"
         )
         raise self.retry(exc=e)
+
+@celery_app.task(
+    name="procureai.tasks.price_tasks.run_gem_scan",
+    bind=True,
+    max_retries=2,
+    default_retry_delay=300,
+)
+def run_gem_scan(self) -> dict:
+    """
+    Scan GeM for eligible tenders for all customers.
+    Called daily at 7 AM IST (1:30 AM UTC).
+    """
+    logger.info(
+        f"[Task {self.request.id}] Starting GeM scan"
+    )
+
+    async def _run():
+        from procureai.services.gem_service import gem_service
+        SessionLocal = get_sync_session()
+        async with SessionLocal() as db:
+            return await gem_service.scan_all_customers(db)
+
+    try:
+        results = asyncio.run(_run())
+        logger.info(
+            f"[Task {self.request.id}] GeM scan complete: "
+            f"{results.get('tenders_found', 0)} tenders found"
+        )
+        return results
+    except Exception as e:
+        logger.error(f"[Task {self.request.id}] GeM scan failed: {e}")
+        raise self.retry(exc=e)    

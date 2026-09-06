@@ -443,6 +443,36 @@ async def trigger_price_pulse() -> TaskResponse:
     )
 
 
+
+@router.post(
+    "/run-gem-scan",
+    response_model=TaskResponse,
+    summary="Trigger GeM tender scan for all customers",
+    dependencies=[Depends(verify_service_token)],
+)
+async def trigger_gem_scan(
+    db: AsyncSession = Depends(get_db),
+) -> TaskResponse:
+    """
+    Scan GeM portal for eligible tenders.
+    Runs synchronously — sends Telegram alerts immediately.
+    Called by GitHub Actions daily at 7 AM IST.
+    """
+    from procureai.services.gem_service import gem_service
+
+    results = await gem_service.scan_all_customers(db)
+
+    return TaskResponse(
+        task_id="sync-gem-scan",
+        status="completed",
+        message=(
+            f"GeM scan complete. "
+            f"{results['tenders_found']} tenders found, "
+            f"{results['alerts_sent']} alerts sent."
+        ),
+    )
+
+
 # ==============================================================================
 # TASK STATUS
 # ==============================================================================
