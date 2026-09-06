@@ -33,7 +33,8 @@ from pydantic import BaseModel
 
 from procureai.celery_app import celery_app
 from procureai.config import get_settings
-from procureai.database import check_database_health
+from procureai.database import check_database_health, get_db
+from sqlalchemy.ext.asyncio import AsyncSession
 from procureai.tasks.delivery_tasks import (
     mark_delivery_confirmed,
     mark_delivery_received,
