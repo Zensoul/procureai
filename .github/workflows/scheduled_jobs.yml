@@ -4,6 +4,7 @@ on:
   schedule:
     - cron: '30 3 16 * *'
     - cron: '30 2 * * *'
+    - cron: '0 3 * * *'
     - cron: '30 3 * * 1'
   workflow_dispatch:
 
@@ -22,6 +23,20 @@ jobs:
             -H "Content-Type: application/json" \
             -d '{}' \
             --max-time 300
+
+  morning-brief:
+    runs-on: ubuntu-latest
+    if: github.event.schedule == '0 3 * * *' || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Wake up API
+        run: curl -s https://procureai-api-iftl.onrender.com/internal/health
+
+      - name: Send morning brief
+        run: |
+          curl -X POST https://procureai-api-iftl.onrender.com/internal/run-morning-brief \
+            -H "Authorization: Bearer ${{ secrets.PROCUREAI_SECRET_KEY }}" \
+            -H "Content-Type: application/json" \
+            --max-time 120
 
   delivery-daily:
     runs-on: ubuntu-latest

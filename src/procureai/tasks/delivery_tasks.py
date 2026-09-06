@@ -224,3 +224,115 @@ def mark_delivery_received(
             f"[Task {self.request.id}] Mark received failed: {e}"
         )
         raise self.retry(exc=e)
+
+
+@celery_app.task(
+    name="procureai.tasks.delivery_tasks.run_morning_brief",
+    bind=True,
+    max_retries=2,
+    default_retry_delay=120,
+)
+def run_morning_brief(self) -> dict:
+    """
+    Send daily morning brief to all active customers via Telegram.
+    Called every day at 8:00 AM IST (2:30 AM UTC).
+    """
+    logger.info(
+        f"[Task {self.request.id}] Starting morning brief"
+    )
+
+    async def _run():
+        from procureai.integrations.telegram_bot import telegram_client
+        from procureai.models.customer import Customer
+        from procureai.models.itc import ITCTracking
+        from procureai.models.purchase import Purchase
+        from sqlalchemy import select, and_
+        from datetime import date
+
+        results = {
+            "total": 0,
+            "sent": 0,
+            "skipped": 0,
+            "failed": 0,
+        }
+
+        SessionLocal = get_sync_session()
+        async with SessionLocal() as db:
+            result = await db.execute(
+                select(Customer).where(
+                    and_(
+                        Customer.is_active == True,
+                        Customer.telegram_chat_id.isnot(None),
+                    )
+                )
+            )
+            customers = result.scalars().all()
+            results["total"] = len(customers)
+
+            today = date.today().isoformat()
+            current_month = date.today().strftime("%m%Y")
+
+            for customer in customers:
+                try:
+                    # Get ITC at risk this month
+                    itc_result = await db.execute(
+                        select(ITCTracking).where(
+                            and_(
+                                ITCTracking.customer_id == customer.id,
+                                ITCTracking.tax_period == current_month,
+                            )
+                        )
+                    )
+                    itc_record = itc_result.scalar_one_or_none()
+                    itc_at_risk = float(
+                        itc_record.at_risk_itc
+                    ) if itc_record else 0
+
+                    # Get overdue deliveries
+                    delivery_result = await db.execute(
+                        select(Purchase).where(
+                            and_(
+                                Purchase.customer_id == customer.id,
+                                Purchase.expected_delivery_date <= today,
+                                Purchase.delivery_received == False,
+                            )
+                        )
+                    )
+                    overdue = delivery_result.scalars().all()
+
+                    # Send morning brief
+                    await telegram_client.send_morning_brief(
+                        chat_id=customer.telegram_chat_id,
+                        owner_name=customer.owner_name,
+                        itc_at_risk=itc_at_risk,
+                        overdue_deliveries=len(overdue),
+                    )
+                    results["sent"] += 1
+                    logger.info(
+                        f"Morning brief sent to {customer.owner_name}"
+                    )
+
+                except Exception as e:
+                    logger.error(
+                        f"Morning brief failed for "
+                        f"{customer.gstin}: {e}"
+                    )
+                    results["failed"] += 1
+                    continue
+
+        return results
+
+    try:
+        results = asyncio.run(_run())
+        logger.info(
+            f"[Task {self.request.id}] Morning brief complete: "
+            f"{results['sent']} sent, "
+            f"{results['failed']} failed"
+        )
+        return results
+
+    except Exception as e:
+        logger.error(
+            f"[Task {self.request.id}] Morning brief failed: {e}"
+        )
+        raise self.retry(exc=e)    

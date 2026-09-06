@@ -333,6 +333,30 @@ async def trigger_supplier_followup() -> TaskResponse:
                 f"Check status at /internal/task-status/{task.id}",
     )
 
+@router.post(
+    "/run-morning-brief",
+    response_model=TaskResponse,
+    summary="Send morning brief to all customers",
+    dependencies=[Depends(verify_service_token)],
+)
+async def trigger_morning_brief() -> TaskResponse:
+    """
+    Send daily morning brief to all customers with Telegram.
+    Called by GitHub Actions every day at 8:00 AM IST.
+    """
+    from procureai.tasks.delivery_tasks import run_morning_brief
+
+    task = run_morning_brief.delay()
+
+    logger.info(f"Morning brief triggered: task_id={task.id}")
+
+    return TaskResponse(
+        task_id=task.id,
+        status="queued",
+        message=f"Morning brief queued. "
+                f"Check status at /internal/task-status/{task.id}",
+    )    
+
 
 # ==============================================================================
 # PRICE PULSE TRIGGER
