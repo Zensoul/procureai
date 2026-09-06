@@ -34,7 +34,7 @@ from loguru import logger
 
 from procureai.config import get_settings
 from procureai.database import connect_db, disconnect_db
-from procureai.routers import customers, internal, purchases, payments
+from procureai.routers import customers, internal, purchases, payments, sales
 
 settings = get_settings()
 
@@ -253,6 +253,7 @@ app.include_router(customers.router)
 app.include_router(purchases.router)
 app.include_router(payments.router)
 app.include_router(internal.router)
+app.include_router(sales.router)
 
 
 # ==============================================================================
