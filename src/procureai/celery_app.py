@@ -48,10 +48,22 @@ settings = get_settings()
 # Using the same Redis for both is fine at our scale.
 # ==============================================================================
 
+# Handle Upstash rediss:// SSL URL for Celery
+def _get_redis_url(url: str) -> str:
+    """Add SSL cert params required by Celery for rediss:// URLs."""
+    if url.startswith("rediss://"):
+        if "?" not in url:
+            return f"{url}?ssl_cert_reqs=CERT_NONE"
+        elif "ssl_cert_reqs" not in url:
+            return f"{url}&ssl_cert_reqs=CERT_NONE"
+    return url
+
+_broker_url = _get_redis_url(settings.redis_url)
+
 celery_app = Celery(
     "procureai",
-    broker=settings.redis_url,
-    backend=settings.redis_url,
+    broker=_broker_url,
+    backend=_broker_url,
     include=[
         # Tell Celery where to find task definitions
         "procureai.tasks.itc_tasks",
