@@ -39,6 +39,8 @@ from procureai.schemas.purchase import (
 )
 from procureai.tasks.price_tasks import check_single_customer_prices
 
+from procureai.services.delivery_tracker import delivery_service
+
 settings = get_settings()
 
 router = APIRouter(
@@ -410,6 +412,93 @@ async def get_at_risk_invoices(
     purchases = result.scalars().all()
 
     return [_purchase_to_response(p) for p in purchases]
+
+
+
+@router.get(
+    "/customer/{customer_id}/supplier-scorecard",
+    summary="Get supplier reliability scorecard",
+)
+async def get_supplier_scorecard(
+    customer_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """
+    Get reliability scorecard for all suppliers of a customer.
+
+    Returns:
+    - On-time delivery rate per supplier
+    - Average days late
+    - Reliability score out of 100
+    - Total deliveries tracked
+
+    Used in demo to show: "Sharma Metals: 87% on time"
+    """
+    await _get_customer_or_404(customer_id, db)
+
+    # Get all unique suppliers for this customer
+    import uuid as uuid_lib
+    from sqlalchemy import distinct
+
+    result = await db.execute(
+        select(
+            Purchase.supplier_gstin,
+            Purchase.supplier_name,
+        ).where(
+            and_(
+                Purchase.customer_id == uuid_lib.UUID(customer_id),
+                Purchase.expected_delivery_date.isnot(None),
+            )
+        ).distinct()
+    )
+    suppliers = result.fetchall()
+
+    if not suppliers:
+        return {
+            "customer_id": customer_id,
+            "total_suppliers": 0,
+            "scorecards": [],
+            "message": "No delivery data yet. "
+                      "Log purchases with expected_delivery_date to build scorecards."
+        }
+
+    scorecards = []
+    for supplier_gstin, supplier_name in suppliers:
+        score = await delivery_service.get_supplier_reliability_score(
+            customer_id=customer_id,
+            supplier_gstin=supplier_gstin,
+            db=db,
+        )
+        score["supplier_name"] = supplier_name
+
+        # Add star rating for display
+        if score["score"] is None:
+            stars = "N/A"
+        elif score["score"] >= 90:
+            stars = "⭐⭐⭐⭐⭐"
+        elif score["score"] >= 75:
+            stars = "⭐⭐⭐⭐"
+        elif score["score"] >= 60:
+            stars = "⭐⭐⭐"
+        elif score["score"] >= 40:
+            stars = "⭐⭐"
+        else:
+            stars = "⭐"
+
+        score["stars"] = stars
+        scorecards.append(score)
+
+    # Sort by score descending — best suppliers first
+    scorecards.sort(
+        key=lambda x: x["score"] or 0,
+        reverse=True
+    )
+
+    return {
+        "customer_id": customer_id,
+        "total_suppliers": len(scorecards),
+        "scorecards": scorecards,
+    }
 
 
 # ==============================================================================
